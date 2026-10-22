@@ -41,22 +41,18 @@ packages the day before a release is how you lose a weekend.
 ## Install
 
 ```bash
-pip install shouldibump
+pip install git+https://github.com/theadvay/shouldibump
 ```
 
-Or run it without installing anything:
-
-```bash
-pipx run shouldibump
-```
-
-Or straight from source:
+Or from a clone:
 
 ```bash
 git clone https://github.com/theadvay/shouldibump
 cd shouldibump
-pip install -e .
+pip install .
 ```
+
+`shouldibump` is not on PyPI yet — until it is, use one of the commands above.
 
 Python 3.9+ and no third-party packages. (On 3.9/3.10, reading `pyproject.toml`
 additionally needs `pip install tomli`; the other manifest types work as-is.)
