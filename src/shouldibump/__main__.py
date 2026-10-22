@@ -1,5 +1,6 @@
 """Run the CLI via python -m."""
 
+import sys
 from .cli import main
 
-main()
+sys.exit(main())
