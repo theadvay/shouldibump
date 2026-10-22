@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shouldibump"
+version = "0.1.0"
+description = "Know which dependencies are actually worth updating — and what might break."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Advay" }]
+keywords = [
+    "dependencies",
+    "dependency-management",
+    "upgrade",
+    "cli",
+    "security",
+    "osv",
+    "vulnerability",
+    "pypi",
+    "npm",
+    "devtools",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Software Distribution",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+shouldibump = "shouldibump.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/theadvay/shouldibump"
+Repository = "https://github.com/theadvay/shouldibump"
+Issues = "https://github.com/theadvay/shouldibump/issues"
+Changelog = "https://github.com/theadvay/shouldibump/releases"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
