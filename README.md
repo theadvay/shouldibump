@@ -2,6 +2,11 @@
 
 **Know which dependencies are actually worth updating — and what might break.**
 
+[![CI](https://github.com/theadvay/shouldibump/actions/workflows/ci.yml/badge.svg)](https://github.com/theadvay/shouldibump/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://github.com/theadvay/shouldibump)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)](pyproject.toml)
+
 One command. Zero dependencies. No config file.
 
 `shouldibump` reads your dependency manifests, asks PyPI and npm what the latest
@@ -67,23 +72,44 @@ shouldibump --only-outdated      # hide everything that is already current
 shouldibump --no-dev             # skip dev / optional dependencies
 shouldibump --no-vulns           # skip the vulnerability check
 shouldibump --ignore django,pyyaml
-shouldibump --json               # machine-readable output
+shouldibump --format markdown    # a table you can paste into a PR
 ```
 
-It auto-detects `requirements*.txt`, `pyproject.toml` (PEP 621 **and** Poetry)
-and `package.json` (npm / pnpm / yarn).
+It auto-detects `requirements*.txt` (including `-r other.txt` includes),
+`pyproject.toml` (PEP 621 **and** Poetry) and `package.json`
+(npm / pnpm / yarn). If a package appears in more than one manifest it is
+reported once, with all of its sources kept.
 
-### In CI
+## Output formats
 
-Fail the build only when something genuinely dangerous shows up:
+| `--format` | What you get |
+| --- | --- |
+| `table` (default) | The coloured terminal table above |
+| `json` | Full machine-readable results (`--json` is a shortcut) |
+| `markdown` | A Markdown table, for PR comments and job summaries |
+| `sarif` | [SARIF 2.1.0](https://sarifweb.azurewebsites.net/), for code scanning |
+
+## In CI
+
+Gate the build on risk:
 
 ```yaml
-- run: pip install shouldibump
+- run: pip install git+https://github.com/theadvay/shouldibump
 - run: shouldibump --fail-on high
 ```
 
-`--fail-on` accepts `none`, `low`, `medium`, `high` or `critical`, and exits with
-status `1` when any dependency reaches that level. Default is `none` (never fails).
+`--fail-on` accepts `none`, `low`, `medium`, `high` or `critical`, and exits
+with status `1` when any dependency reaches that level. Default is `none`
+(never fails).
+
+Or surface results in the repository's **Security → Code scanning** tab:
+
+```yaml
+- run: shouldibump --format sarif --no-dev > shouldibump.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: shouldibump.sarif
+```
 
 ## How the risk score works
 
@@ -111,14 +137,15 @@ If the OSV lookup itself cannot be reached (an offline machine, a restrictive
 proxy), the report says so explicitly at the bottom instead of quietly implying
 "no known vulnerabilities".
 
-## Contributing
-
-Issues and PRs are welcome. To run the tests:
+## Development
 
 ```bash
-pip install -e ".[test]"
-pytest
+pip install -e ".[test]" ruff
+ruff check . && ruff format --check .
+pytest --cov=shouldibump --cov-report=term-missing
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## License
 
