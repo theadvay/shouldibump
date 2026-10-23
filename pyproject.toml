@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shouldibump"
-version = "0.1.0"
+version = "0.2.0"
 description = "Know which dependencies are actually worth updating — and what might break."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -18,6 +18,7 @@ keywords = [
     "security",
     "osv",
     "vulnerability",
+    "sarif",
     "pypi",
     "npm",
     "devtools",
@@ -36,7 +37,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+test = ["pytest>=7", "pytest-cov>=4"]
 
 [project.scripts]
 shouldibump = "shouldibump.cli:main"
@@ -50,7 +51,35 @@ Changelog = "https://github.com/theadvay/shouldibump/releases"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+shouldibump = ["py.typed"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers"
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["shouldibump"]
+branch = true
+# __main__.py is exercised through a subprocess test, so it cannot be
+# measured in-process; omitting it keeps the number honest.
+omit = ["*/shouldibump/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "C408"]
