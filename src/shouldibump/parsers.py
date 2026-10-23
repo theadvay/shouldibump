@@ -1,7 +1,7 @@
 """Read dependency manifests into a common shape.
 
 Supported today:
-  * ``requirements*.txt``  (pip / pip-tools)
+  * ``requirements*.txt``  (pip / pip-tools, including ``-r other.txt`` includes)
   * ``pyproject.toml``     (PEP 621 and Poetry)
   * ``package.json``       (npm / pnpm / yarn)
 
@@ -32,6 +32,8 @@ _NUMBER_RE = re.compile(r"\d+(?:\.\d+)*")
 # Operators whose operand is a *lower bound* we can treat as the current version.
 _FLOOR_OPS = {"==", "===", "~=", ">=", "=", "^", "~"}
 
+_INCLUDE_FLAGS = ("-r", "--requirement")
+
 
 def base_version(spec):
     """Pull the first concrete version token out of a requirement spec.
@@ -42,6 +44,17 @@ def base_version(spec):
         return None
     match = _NUMBER_RE.search(spec)
     return match.group(0) if match else None
+
+
+def include_target(line):
+    """Return the file named by an ``-r``/``--requirement`` line, else ``None``."""
+    for flag in _INCLUDE_FLAGS:
+        if line == flag:
+            return None
+        for prefix in (flag + " ", flag + "="):
+            if line.startswith(prefix):
+                return line[len(prefix) :].strip() or None
+    return None
 
 
 def parse_requirement(line):
@@ -74,7 +87,7 @@ def parse_requirement(line):
         return None
     name = name_match.group(1)
 
-    rest = text[name_match.end():].strip()
+    rest = text[name_match.end() :].strip()
     rest = re.sub(r"^\[[^\]]*\]", "", rest).strip()  # drop extras: pkg[extra]
 
     current = None
@@ -101,8 +114,7 @@ def parse_requirement(line):
 def _load_toml(path):
     if tomllib is None:  # pragma: no cover
         raise RuntimeError(
-            "Reading pyproject.toml needs Python 3.11+ or the 'tomli' package "
-            "(pip install tomli)."
+            "Reading pyproject.toml needs Python 3.11+ or the 'tomli' package (pip install tomli)."
         )
     with open(path, "rb") as handle:
         return tomllib.load(handle)
@@ -173,7 +185,7 @@ _NPM_GROUPS = (
 
 
 def _from_package_json(path):
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
 
     deps = []
@@ -181,15 +193,16 @@ def _from_package_json(path):
         for name, spec in (data.get(key) or {}).items():
             spec = spec or ""
             exact = bool(re.fullmatch(r"\d+(?:\.\d+)*", spec.strip()))
-            current = base_version(spec)
-            deps.append({
-                "name": name,
-                "ecosystem": "npm",
-                "spec": spec,
-                "current": current,
-                "exact": exact,
-                "group": group,
-            })
+            deps.append(
+                {
+                    "name": name,
+                    "ecosystem": "npm",
+                    "spec": spec,
+                    "current": base_version(spec),
+                    "exact": exact,
+                    "group": group,
+                }
+            )
     return deps
 
 
@@ -200,30 +213,55 @@ def _requirements_group(filename):
     return "main"
 
 
+def _read_requirements(path, group, seen, deps):
+    """Read a requirements file, following ``-r`` includes (cycle-safe)."""
+    real = os.path.realpath(path)
+    if real in seen:
+        return
+    seen.add(real)
+
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return
+
+    for line in lines:
+        target = include_target(line.split("#", 1)[0].strip())
+        if target:
+            _read_requirements(os.path.join(os.path.dirname(path), target), group, seen, deps)
+            continue
+        parsed = parse_requirement(line)
+        if parsed:
+            parsed["group"] = group
+            parsed["source"] = path
+            deps.append(parsed)
+
+
 def collect_dependencies(paths, include_dev=True):
     """Parse every recognised manifest in *paths* into a flat dependency list."""
     deps = []
+    seen_requirements = set()
+
     for path in paths:
         filename = os.path.basename(path)
         try:
             if filename.startswith("requirements") and filename.endswith(".txt"):
-                group = _requirements_group(filename)
-                with open(path, "r", encoding="utf-8") as handle:
-                    for line in handle:
-                        parsed = parse_requirement(line)
-                        if parsed:
-                            parsed["group"] = group
-                            deps.append(parsed)
+                _read_requirements(path, _requirements_group(filename), seen_requirements, deps)
             elif filename == "pyproject.toml":
-                deps.extend(_from_pyproject(path))
+                for dep in _from_pyproject(path):
+                    dep["source"] = path
+                    deps.append(dep)
             elif filename == "package.json":
-                deps.extend(_from_package_json(path))
+                for dep in _from_package_json(path):
+                    dep["source"] = path
+                    deps.append(dep)
         except Exception:  # a broken manifest should not kill the whole run
             continue
 
     for dep in deps:
         dep.setdefault("group", "main")
-        dep["source"] = os.path.basename(dep.get("source") or "") or dep.get("source", "")
+        dep.setdefault("source", "")
 
     if not include_dev:
         deps = [d for d in deps if d.get("group") == "main"]
