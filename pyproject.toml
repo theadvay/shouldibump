@@ -63,9 +63,6 @@ filterwarnings = ["error"]
 [tool.coverage.run]
 source = ["shouldibump"]
 branch = true
-# __main__.py is exercised through a subprocess test, so it cannot be
-# measured in-process; omitting it keeps the number honest.
-omit = ["*/shouldibump/__main__.py"]
 
 [tool.coverage.report]
 show_missing = true
