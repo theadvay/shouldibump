@@ -49,10 +49,42 @@ def discover(target):
     return sorted(found, key=rank)
 
 
+def merge_duplicates(deps):
+    """Collapse the same package declared in several manifests into one entry.
+
+    Keeps every source file, and prefers an exact version when any declaration
+    provides one.
+    """
+    merged = {}
+    order = []
+    for dep in deps:
+        key = (dep["name"].lower(), dep["ecosystem"])
+        if key not in merged:
+            entry = dict(dep)
+            entry["sources"] = [dep["source"]] if dep.get("source") else []
+            merged[key] = entry
+            order.append(key)
+            continue
+
+        entry = merged[key]
+        source = dep.get("source")
+        if source and source not in entry["sources"]:
+            entry["sources"].append(source)
+
+        if not entry.get("exact") and dep.get("exact"):
+            entry["current"] = dep.get("current")
+            entry["exact"] = True
+            entry["spec"] = dep.get("spec", entry.get("spec", ""))
+        elif entry.get("current") is None and dep.get("current"):
+            entry["current"] = dep.get("current")
+
+    return [merged[key] for key in order]
+
+
 def _installed_pypi(name):
     """Best-effort: the version installed in the current environment, if any."""
     try:
-        from importlib.metadata import PackageNotFoundError, version
+        from importlib.metadata import version
     except Exception:  # pragma: no cover
         return None
     for candidate in (name, name.replace("_", "-").lower()):
@@ -69,7 +101,7 @@ def _installed_npm(name, root):
         return None
     path = os.path.join(root, "node_modules", *name.split("/"), "package.json")
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return (json.load(handle) or {}).get("version")
     except Exception:
         return None
@@ -82,11 +114,12 @@ def compute_risk(bump, current, vulns):
         risk = "high"  # under 0.x, a "minor" bump is allowed to break things
 
     rank = RISK_ORDER.get(risk, -1)
-    vuln_rank = max((osv.severity_rank(v.severity) for v in vulns), default=0)
-    if vulns and vuln_rank == 0:
-        vuln_rank = 3  # a vulnerability with no severity data is still serious
-    if vuln_rank > rank:
-        rank = vuln_rank
+    if vulns:
+        vuln_rank = max((osv.severity_rank(v.severity) for v in vulns), default=0)
+        if vuln_rank == 0:
+            vuln_rank = 3  # a vulnerability with no severity data is still serious
+        if vuln_rank > rank:
+            rank = vuln_rank
 
     return RISK_BY_RANK.get(rank, "unknown")
 
@@ -121,7 +154,7 @@ def enrich(dep, timeout=10.0, check_vulns=True, root=None):
         spec=dep.get("spec", ""),
         current=dep.get("current"),
         group=dep.get("group", "main"),
-        source=dep.get("source", ""),
+        sources=list(dep.get("sources") or ([dep["source"]] if dep.get("source") else [])),
         exact=bool(dep.get("exact")),
     )
 
@@ -137,9 +170,7 @@ def enrich(dep, timeout=10.0, check_vulns=True, root=None):
             finding.exact = True
 
     try:
-        finding.latest = registry.latest_version(
-            finding.name, finding.ecosystem, timeout
-        )
+        finding.latest = registry.latest_version(finding.name, finding.ecosystem, timeout)
     except Exception as exc:
         finding.error = f"lookup failed ({exc})"
 
@@ -151,9 +182,7 @@ def enrich(dep, timeout=10.0, check_vulns=True, root=None):
 
     if check_vulns and finding.exact and finding.current:
         try:
-            finding.vulns = osv.query_osv(
-                finding.name, finding.ecosystem, finding.current, timeout
-            )
+            finding.vulns = osv.query_osv(finding.name, finding.ecosystem, finding.current, timeout)
         except Exception as exc:
             # Best-effort: never fatal, but record it so the report can say so
             # rather than implying "no known vulnerabilities".
@@ -175,27 +204,23 @@ def _sort_key(finding):
 
 
 def scan(target=".", timeout=10.0, jobs=8, check_vulns=True, include_dev=True):
-    """Scan *target* and return ``(findings, manifest_paths)``."""
+    """Scan *target* and return ``(findings, manifest_paths, meta)``."""
     paths = discover(target)
-    deps = parsers.collect_dependencies(paths, include_dev=include_dev)
+    deps = merge_duplicates(parsers.collect_dependencies(paths, include_dev=include_dev))
 
     root = target if os.path.isdir(target) else os.path.dirname(os.path.abspath(target))
 
     findings = []
     if deps:
         with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
-            futures = [
-                pool.submit(enrich, dep, timeout, check_vulns, root) for dep in deps
-            ]
+            futures = [pool.submit(enrich, dep, timeout, check_vulns, root) for dep in deps]
             for future in futures:
                 findings.append(future.result())
 
     findings.sort(key=_sort_key)
 
     meta = {
-        "vuln_attempted": sum(
-            1 for f in findings if check_vulns and f.exact and f.current
-        ),
+        "vuln_attempted": sum(1 for f in findings if check_vulns and f.exact and f.current),
         "vuln_failed": sum(1 for f in findings if f.vuln_error),
     }
     return findings, paths, meta
