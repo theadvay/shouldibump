@@ -1,11 +1,11 @@
-"""Render findings as a clean, coloured terminal table."""
+"""Render findings: a coloured terminal table, or Markdown for PR comments."""
 
 from __future__ import annotations
 
 import os
 import re
 
-__all__ = ["Style", "render", "render_table"]
+__all__ = ["Style", "render", "render_table", "render_markdown"]
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -80,9 +80,7 @@ def render_table(headers, rows):
             widths[index] = max(widths[index], _width(cell))
 
     def line(cells):
-        padded = [
-            cell + " " * (widths[i] - _width(cell)) for i, cell in enumerate(cells)
-        ]
+        padded = [cell + " " * (widths[i] - _width(cell)) for i, cell in enumerate(cells)]
         return "  ".join(padded).rstrip()
 
     output = [line(headers), "  ".join("─" * w for w in widths)]
@@ -90,7 +88,8 @@ def render_table(headers, rows):
     return "\n".join(output)
 
 
-def _summary(findings, style):
+def _summary_parts(findings):
+    """Return ``[(colour, text), ...]`` describing the run."""
     outdated = sum(1 for f in findings if f.outdated)
     vulnerable = sum(1 for f in findings if f.vulnerable)
     high = sum(1 for f in findings if f.risk_rank >= 3)
@@ -98,19 +97,26 @@ def _summary(findings, style):
 
     parts = []
     if outdated:
-        parts.append(style.yellow(f"{outdated} to update"))
+        parts.append(("yellow", f"{outdated} to update"))
     if vulnerable:
-        parts.append(style.red(f"{vulnerable} with known vulnerabilities"))
+        parts.append(("red", f"{vulnerable} with known vulnerabilities"))
     if high:
-        parts.append(style.bold_red(f"{high} high risk"))
+        parts.append(("bold_red", f"{high} high risk"))
     if current:
-        parts.append(style.green(f"{current} up to date"))
-    if not parts:
-        parts.append(f"{len(findings)} packages")
-    return style.dim(" · ").join(parts)
+        parts.append(("green", f"{current} up to date"))
+    return parts
 
 
-def _vuln_warning(meta, style):
+def _summary(findings, style):
+    rendered = [getattr(style, colour)(text) for colour, text in _summary_parts(findings)]
+    return style.dim(" · ").join(rendered)
+
+
+def _summary_plain(findings):
+    return " · ".join(text for _, text in _summary_parts(findings))
+
+
+def _vuln_warning(meta, style=None):
     """A dim caveat when the OSV lookup could not be completed."""
     if not meta:
         return ""
@@ -122,15 +128,12 @@ def _vuln_warning(meta, style):
         text = f"vulnerability lookup failed for all {failed} checked packages — results may be incomplete"
     else:
         text = f"vulnerability lookup failed for {failed} of {attempted} checked packages"
-    return "  " + style.dim("note: " + text)
+    return "note: " + text
 
 
 def render(findings, paths, style, only_outdated=False, target=".", meta=None):
-    """Return the full report as a string."""
-    if only_outdated:
-        shown = [f for f in findings if f.outdated or f.vulnerable]
-    else:
-        shown = list(findings)
+    """Return the full terminal report as a string."""
+    shown = [f for f in findings if f.outdated or f.vulnerable] if only_outdated else list(findings)
 
     lines = [
         style.bold("shouldibump") + style.dim("  ·  which dependencies are worth updating"),
@@ -140,18 +143,21 @@ def render(findings, paths, style, only_outdated=False, target=".", meta=None):
         "",
     ]
 
-    warning = _vuln_warning(meta, style)
+    warning = _vuln_warning(meta)
 
     if not shown:
         if findings:
             lines.append(
-                "  " + style.green("Nothing to do — every dependency is current, with no known vulnerabilities.")
+                "  "
+                + style.green(
+                    "Nothing to do — every dependency is current, with no known vulnerabilities."
+                )
             )
         else:
             lines.append("  " + style.dim("No dependencies found."))
         if warning:
             lines.append("")
-            lines.append(warning)
+            lines.append("  " + style.dim(warning))
         return "\n".join(lines)
 
     headers = ["PACKAGE", "CURRENT", "LATEST", "BUMP", "RISK", "NOTE"]
@@ -167,14 +173,16 @@ def render(findings, paths, style, only_outdated=False, target=".", meta=None):
         elif not finding.outdated:
             note = style.dim(note)
 
-        rows.append([
-            name,
-            finding.current or (finding.spec or "?"),
-            finding.latest or "—",
-            _BUMP_LABEL.get(finding.bump, finding.bump),
-            _risk_color(style, finding.risk)(_RISK_LABEL.get(finding.risk, finding.risk)),
-            note,
-        ])
+        rows.append(
+            [
+                name,
+                finding.current or (finding.spec or "?"),
+                finding.latest or "—",
+                _BUMP_LABEL.get(finding.bump, finding.bump),
+                _risk_color(style, finding.risk)(_RISK_LABEL.get(finding.risk, finding.risk)),
+                note,
+            ]
+        )
 
     table = render_table(headers, rows)
     lines.extend("  " + row for row in table.splitlines())
@@ -182,5 +190,54 @@ def render(findings, paths, style, only_outdated=False, target=".", meta=None):
     lines.append("  " + _summary(findings, style))
     if warning:
         lines.append("")
-        lines.append(warning)
+        lines.append("  " + style.dim(warning))
+    return "\n".join(lines)
+
+
+def _md_cell(text):
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def render_markdown(findings, paths, meta=None, target=".", only_outdated=False):
+    """Return a Markdown report, handy for PR comments and CI summaries."""
+    shown = [f for f in findings if f.outdated or f.vulnerable] if only_outdated else list(findings)
+
+    lines = ["## shouldibump report", ""]
+    scanned = ", ".join(f"`{os.path.basename(p)}`" for p in paths)
+    lines.append(f"Scanned {scanned} in `{target}`.")
+    lines.append("")
+
+    if not shown:
+        if findings:
+            lines.append(
+                "Nothing to do — every dependency is current, with no known vulnerabilities."
+            )
+        else:
+            lines.append("No dependencies found.")
+        warning = _vuln_warning(meta)
+        if warning:
+            lines += ["", f"> {warning}"]
+        return "\n".join(lines)
+
+    lines.append("| Package | Current | Latest | Bump | Risk | Note |")
+    lines.append("| --- | --- | --- | --- | --- | --- |")
+    for finding in shown:
+        name = finding.name
+        if finding.group not in ("main", ""):
+            name = f"{name} ({finding.group})"
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} |".format(
+                _md_cell(name),
+                _md_cell(finding.current or (finding.spec or "?")),
+                _md_cell(finding.latest or "—"),
+                _md_cell(_BUMP_LABEL.get(finding.bump, finding.bump)),
+                _md_cell(_RISK_LABEL.get(finding.risk, finding.risk)),
+                _md_cell(finding.note),
+            )
+        )
+
+    lines += ["", f"**{_summary_plain(findings)}**"]
+    warning = _vuln_warning(meta)
+    if warning:
+        lines += ["", f"> {warning}"]
     return "\n".join(lines)
