@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-10-23
+
+### Added
+
+- `--format` with four outputs: `table` (default), `json`, `markdown` and `sarif`.
+- Markdown reports, for pasting into pull-request comments and CI job summaries.
+- SARIF 2.1.0 export, so GitHub code scanning can ingest the results.
+- A `py.typed` marker; the package ships its type information.
+- Coverage and lint tooling (`pytest-cov`, `ruff`) wired into CI.
+
+### Fixed
+
+- A dependency declared in more than one manifest is now reported once, with
+  every source file kept.
+- `requirements.txt` `-r other.txt` includes are followed, cycle-safely.
+- Releases whose files have all been yanked on PyPI are no longer suggested as
+  an upgrade target.
+- A dependency whose current version cannot be determined no longer scores as
+  `none` — it stays `unknown`.
+- SARIF locations are relative to the scan root, so code scanning can map them
+  back to files in the repository.
+- Source manifests are now recorded per dependency instead of being dropped.
+
+### Changed
+
+- All outbound requests go through one HTTP layer with retry and exponential
+  backoff on transient failures.
+
 ## [0.1.0] — 2026-10-22
 
 ### Added
