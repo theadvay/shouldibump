@@ -1,22 +1,17 @@
 """Query the OSV.dev database for known vulnerabilities.
 
 OSV is a free, open, aggregated vulnerability database (Google-maintained)
-covering PyPI and npm among many others. The batch/query API needs no key.
+covering PyPI and npm among many others. The query API needs no key.
 """
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
-
-from . import __version__
+from . import http
 from .models import Vuln
 
 __all__ = ["query_osv", "severity_rank"]
 
 _API = "https://api.osv.dev/v1/query"
-_USER_AGENT = f"shouldibump/{__version__} (+https://github.com/theadvay/shouldibump)"
 
 _ECOSYSTEM = {"pypi": "PyPI", "npm": "npm"}
 
@@ -63,10 +58,11 @@ def _to_vuln(raw):
     )
 
 
-def query_osv(name, ecosystem, version, timeout=10):
+def query_osv(name, ecosystem, version, timeout=10.0):
     """Return a list of :class:`Vuln` affecting ``name==version``.
 
-    Raises on network trouble; callers decide whether that is fatal.
+    Raises :class:`shouldibump.http.HttpError` on network trouble; callers
+    decide whether that is fatal.
     """
     osv_ecosystem = _ECOSYSTEM.get(ecosystem)
     if osv_ecosystem is None:
@@ -76,22 +72,5 @@ def query_osv(name, ecosystem, version, timeout=10):
     if version:
         payload["version"] = version
 
-    request = urllib.request.Request(
-        _API,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "User-Agent": _USER_AGENT,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"OSV HTTP {exc.code}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"OSV network error: {exc.reason}") from exc
-
-    return [_to_vuln(item) for item in data.get("vulns") or []]
+    data = http.post_json(_API, payload, timeout=timeout)
+    return [_to_vuln(item) for item in (data.get("vulns") or [])]
