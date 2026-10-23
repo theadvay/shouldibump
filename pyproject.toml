@@ -63,6 +63,9 @@ filterwarnings = ["error"]
 [tool.coverage.run]
 source = ["shouldibump"]
 branch = true
+# __main__.py is a two-line shim that just runs the CLI; it is not exercised
+# by the unit tests, so it is excluded from the coverage figure.
+omit = ["*/shouldibump/__main__.py"]
 
 [tool.coverage.report]
 show_missing = true
