@@ -41,7 +41,7 @@ class Finding:
     risk: str = "unknown"
     note: str = ""
     group: str = "main"  # main | dev | optional | peer | <extra-name>
-    source: str = ""
+    sources: list = field(default_factory=list)  # manifest files it came from
     exact: bool = False  # is `current` a resolved version, or just a declared floor?
     vulns: list = field(default_factory=list)
     error: str | None = None
