@@ -8,13 +8,14 @@ import json
 import os
 import sys
 
-from . import __version__, report
+from . import __version__, report, sarif
 from . import scan as scanner
 from .models import RISK_ORDER
 
 __all__ = ["main", "build_parser"]
 
 _FAIL_LEVELS = ["none", "low", "medium", "high", "critical"]
+_FORMATS = ["table", "json", "markdown", "sarif"]
 
 
 def build_parser():
@@ -31,18 +32,20 @@ def build_parser():
         default=".",
         help="project directory or a single manifest file (default: current directory)",
     )
-    parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    parser.add_argument(
+        "--format",
+        choices=_FORMATS,
+        default="table",
+        help="output format (default: table)",
+    )
+    parser.add_argument("--json", action="store_true", help="shortcut for --format json")
     parser.add_argument(
         "--only-outdated",
         action="store_true",
         help="hide dependencies that are already current",
     )
-    parser.add_argument(
-        "--no-dev", action="store_true", help="skip dev and optional dependencies"
-    )
-    parser.add_argument(
-        "--no-vulns", action="store_true", help="skip the OSV vulnerability check"
-    )
+    parser.add_argument("--no-dev", action="store_true", help="skip dev and optional dependencies")
+    parser.add_argument("--no-vulns", action="store_true", help="skip the OSV vulnerability check")
     parser.add_argument(
         "--ignore",
         action="append",
@@ -62,13 +65,9 @@ def build_parser():
         default=10.0,
         help="per-request timeout in seconds (default: 10)",
     )
-    parser.add_argument(
-        "--jobs", type=int, default=8, help="parallel lookups (default: 8)"
-    )
+    parser.add_argument("--jobs", type=int, default=8, help="parallel lookups (default: 8)")
     parser.add_argument("--no-color", action="store_true", help="disable coloured output")
-    parser.add_argument(
-        "--version", action="version", version=f"shouldibump {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"shouldibump {__version__}")
     return parser
 
 
@@ -90,7 +89,13 @@ def _as_json(findings, paths, target, meta=None):
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.jobs < 1:
+        parser.error("--jobs must be at least 1")
+    if args.timeout <= 0:
+        parser.error("--timeout must be greater than 0")
 
     if not os.path.exists(args.path):
         print(f"shouldibump: no such file or directory: {args.path}", file=sys.stderr)
@@ -121,14 +126,15 @@ def main(argv=None):
     if ignore:
         findings = [f for f in findings if f.name.lower() not in ignore]
 
-    if args.json:
+    fmt = "json" if args.json else args.format
+    if fmt == "json":
         print(json.dumps(_as_json(findings, paths, args.path, meta), indent=2))
+    elif fmt == "markdown":
+        print(report.render_markdown(findings, paths, meta, args.path, args.only_outdated))
+    elif fmt == "sarif":
+        print(json.dumps(sarif.build_sarif(findings, args.path), indent=2))
     else:
-        use_color = (
-            not args.no_color
-            and not os.environ.get("NO_COLOR")
-            and sys.stdout.isatty()
-        )
+        use_color = not args.no_color and not os.environ.get("NO_COLOR") and sys.stdout.isatty()
         print(
             report.render(
                 findings,
