@@ -14,12 +14,19 @@ __all__ = ["parse_version", "compare", "classify_bump", "major_of"]
 # Pre-release tags, ordered so that a lower value sorts *before* the final release.
 _PRE_ORDER = {
     "dev": -5,
-    "a": -3, "alpha": -3,
-    "b": -2, "beta": -2,
-    "c": -1, "rc": -1, "pre": -1, "preview": -1,
+    "a": -3,
+    "alpha": -3,
+    "b": -2,
+    "beta": -2,
+    "c": -1,
+    "rc": -1,
+    "pre": -1,
+    "preview": -1,
 }
 
 _RELEASE_RE = re.compile(r"(\d+(?:\.\d+)*)")
+# Leading range/prefix operators and a "v", e.g. "^1.2.3", ">=2.0", "v1.0".
+_PREFIX_RE = re.compile(r"^[v=~^<>=!\s]+")
 
 # How many numeric components we pad release tuples to before comparing,
 # so that "1.2" and "1.2.0" compare equal.
@@ -38,7 +45,7 @@ def parse_version(value):
         return None
 
     # Drop range/prefix operators and a leading "v" (e.g. "^1.2.3", ">=2.0", "v1.0").
-    text = text.lstrip("v=~^<>=! ").strip()
+    text = _PREFIX_RE.sub("", text).strip()
     if not text:
         return None
 
@@ -54,7 +61,7 @@ def parse_version(value):
     match = _RELEASE_RE.match(text)
     if match:
         release = tuple(int(part) for part in match.group(1).split("."))
-        rest = text[match.end():]
+        rest = text[match.end() :]
     else:
         numbers = re.findall(r"\d+", text)
         if not numbers:  # a version with no digits at all is not a version
